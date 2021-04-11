@@ -12,7 +12,6 @@ import com.stevenpaligo.spacetrack.client.Query;
 import com.stevenpaligo.spacetrack.client.query.QueryField;
 import com.stevenpaligo.spacetrack.client.util.UtcInstantDeserializer;
 
-import lombok.Data;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -28,7 +27,6 @@ public class GpHistoryQuery extends Query<GpHistoryQueryField, GpHistory, GpHist
 
   /**
    * Fields referenced in "gp_history information" queries on <a href="https://www.space-track.org/">Space-Track.org</a>.
-   * 
    */
   public enum GpHistoryQueryField implements QueryField {
 
@@ -40,27 +38,11 @@ public class GpHistoryQuery extends Query<GpHistoryQueryField, GpHistory, GpHist
       }
     },
 
-    OBJECT_NUMBER {
-
-      @Override
-      public String getQueryFieldName() {
-        return "OBJECT_NUMBER";
-      }
-    },
-
     OBJECT_NAME {
 
       @Override
       public String getQueryFieldName() {
         return "OBJECT_NAME";
-      }
-    },
-
-    INTERNATIONAL_DESIGNATOR {
-
-      @Override
-      public String getQueryFieldName() {
-        return "INTLDES";
       }
     },
 
@@ -72,14 +54,6 @@ public class GpHistoryQuery extends Query<GpHistoryQueryField, GpHistory, GpHist
       }
     },
 
-    RCS_METERS_SQUARED {
-
-      @Override
-      public String getQueryFieldName() {
-        return "RCS";
-      }
-    },
-
     RCS_CHARACTERIZATION {
 
       @Override
@@ -88,51 +62,19 @@ public class GpHistoryQuery extends Query<GpHistoryQueryField, GpHistory, GpHist
       }
     },
 
-    COUNTRY {
+    COUNTRY_CODE {
 
       @Override
       public String getQueryFieldName() {
-        return "COUNTRY";
+        return "COUNTRY_CODE";
       }
     },
 
-    MESSAGE_EPOCH {
+    EPOCH {
 
       @Override
       public String getQueryFieldName() {
-        return "MSG_EPOCH";
-      }
-    },
-
-    DECAY_EPOCH {
-
-      @Override
-      public String getQueryFieldName() {
-        return "DECAY_EPOCH";
-      }
-    },
-
-    SOURCE {
-
-      @Override
-      public String getQueryFieldName() {
-        return "SOURCE";
-      }
-    },
-
-    MESSAGE_TYPE {
-
-      @Override
-      public String getQueryFieldName() {
-        return "MSG_TYPE";
-      }
-    },
-
-    DECAY_STAGE {
-
-      @Override
-      public String getQueryFieldName() {
-        return "PRECEDENCE";
+        return "EPOCH";
       }
     }
   }
