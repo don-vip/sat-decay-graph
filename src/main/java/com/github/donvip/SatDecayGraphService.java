@@ -33,9 +33,8 @@ public class SatDecayGraphService {
 
     private Logger logger = LoggerFactory.getLogger(SatDecayGraphService.class);
     
-    private static String generateSVGForChart(JFreeChart chart, int width, int height, String defsPrefix) {
+    private static String generateSVGForChart(JFreeChart chart, int width, int height) {
         SVGGraphics2D g2 = new SVGGraphics2D(width, height);
-        g2.setDefsKeyPrefix(defsPrefix);
         chart.setElementHinting(true);
         chart.draw(g2, new Rectangle(width, height));
         return g2.getSVGElement(chart.getID());
@@ -63,16 +62,23 @@ public class SatDecayGraphService {
      }
 
     @Autowired
-    public SatDecayGraphService(@Value("${spaceTrackLogin}") String spaceTrackLogin, @Value("${spaceTrackPassword}") String spaceTrackPassword, @Value("${satId}") int satId)
+    public SatDecayGraphService(
+            @Value("${spaceTrackLogin}") String spaceTrackLogin,
+            @Value("${spaceTrackPassword}") String spaceTrackPassword,
+            @Value("${satId}") int satId,
+            @Value("${width:1920}") int width,
+            @Value("${height:1080}") int height)
             throws IOException {
         logger.info("Fetching history for satellite {}", satId);
         List<GpHistory> history = new GpHistoryQuery().setCredentials(new DefaultCredentialProvider(spaceTrackLogin, spaceTrackPassword))
                         .addPredicate(new Equal<>(GpHistoryQueryField.CATALOG_NUMBER, satId)).execute()
                         .stream().sorted(Comparator.comparing(GpHistory::getEpoch)).collect(Collectors.toList());
         logger.info("Generating graph for satellite {}", satId);
-        final XYDataset dataset = createDataset(history);         
-        final JFreeChart chart = createChart(dataset, history.get(0).getObjectName());
-        Files.writeString(Path.of("output.svg"), generateSVGForChart(chart, 800, 600, "foo"));
+        if (!history.isEmpty()) {
+            final XYDataset dataset = createDataset(history);         
+            final JFreeChart chart = createChart(dataset, history.get(0).getObjectName());
+            Files.writeString(Path.of("output.svg"), generateSVGForChart(chart, width, height));
+        }
         logger.info("Graph generated for satellite {}", satId);
     }
 }
