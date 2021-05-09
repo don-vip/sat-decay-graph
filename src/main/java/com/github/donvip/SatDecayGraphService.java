@@ -1,5 +1,6 @@
 package com.github.donvip;
 
+import java.awt.Color;
 import java.awt.Rectangle;
 import java.io.IOException;
 import java.net.URL;
@@ -9,9 +10,11 @@ import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TimeZone;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -19,8 +22,13 @@ import javax.annotation.PostConstruct;
 import javax.net.ssl.HttpsURLConnection;
 
 import org.apache.commons.io.IOUtils;
-import org.jfree.chart.ChartFactory;
 import org.jfree.chart.JFreeChart;
+import org.jfree.chart.axis.AxisLocation;
+import org.jfree.chart.axis.DateAxis;
+import org.jfree.chart.axis.NumberAxis;
+import org.jfree.chart.axis.ValueAxis;
+import org.jfree.chart.plot.XYPlot;
+import org.jfree.chart.renderer.xy.XYLineAndShapeRenderer;
 import org.jfree.data.time.Millisecond;
 import org.jfree.data.time.RegularTimePeriod;
 import org.jfree.data.time.TimeSeries;
@@ -88,7 +96,31 @@ public class SatDecayGraphService {
     }
 
     private static JFreeChart createChart(XYDataset dataset, String title) {
-        return ChartFactory.createTimeSeriesChart(title, "Time", "Kilometers", dataset, true, false, false);
+        // Time axis, UTC / English
+        ValueAxis timeAxis = new DateAxis("Time (UTC)", TimeZone.getTimeZone("UTC"), Locale.ENGLISH);
+        timeAxis.setLowerMargin(0.02);
+        timeAxis.setUpperMargin(0.02);
+
+        // Value axis (same on both sides for readability)
+        NumberAxis leftAxis = new NumberAxis("Kilometers");
+        leftAxis.setAutoRangeIncludesZero(false);
+        NumberAxis rightAxis = new NumberAxis(null);
+        rightAxis.setAutoRangeIncludesZero(false);
+
+        // Create plot
+        XYPlot plot = new XYPlot(dataset, timeAxis, leftAxis,
+                new XYLineAndShapeRenderer(true, true));
+        plot.setBackgroundPaint(Color.WHITE);
+        plot.setRangeAxis(1, rightAxis);
+        plot.setRangeAxisLocation(1, AxisLocation.TOP_OR_RIGHT);
+
+        // Ensure both axes have the same range
+        rightAxis.setRange(leftAxis.getRange(), false, false);
+
+        // Create and return chart
+        JFreeChart chart = new JFreeChart(title, JFreeChart.DEFAULT_TITLE_FONT, plot, true);
+        chart.setBackgroundPaint(Color.WHITE);
+        return chart;
     }
 
     private static void apiThrottle() throws InterruptedException {
@@ -114,7 +146,7 @@ public class SatDecayGraphService {
                 logger.info("Generating graph for satellite {} - {}", id, objectName);
                 String filename = objectName.replace('/', '-').replace('\\', '-') + " decay.svg";
                 Files.writeString(Path.of(filename), generateSVGForChart(
-                        createChart(createDataset(history), objectName), width, height));
+                        createChart(createDataset(history), objectName + " altitude"), width, height));
                 logger.info("Graph generated for satellite {}: {}", id, filename);
             } else {
                 logger.error("Unable to generate graph for satellite {}", id);
