@@ -1,5 +1,6 @@
 package com.github.donvip;
 
+import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Rectangle;
 import java.io.IOException;
@@ -108,8 +109,10 @@ public class SatDecayGraphService {
         rightAxis.setAutoRangeIncludesZero(false);
 
         // Create plot
-        XYPlot plot = new XYPlot(dataset, timeAxis, leftAxis,
-                new XYLineAndShapeRenderer(true, true));
+        XYLineAndShapeRenderer renderer = new XYLineAndShapeRenderer(true, true);
+        renderer.setDefaultStroke(new BasicStroke(2.0f));
+        renderer.setAutoPopulateSeriesStroke(false);
+        XYPlot plot = new XYPlot(dataset, timeAxis, leftAxis, renderer);
         plot.setBackgroundPaint(Color.WHITE);
         plot.setRangeAxis(1, rightAxis);
         plot.setRangeAxisLocation(1, AxisLocation.TOP_OR_RIGHT);
