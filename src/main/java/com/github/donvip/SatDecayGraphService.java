@@ -3,6 +3,7 @@ package com.github.donvip;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Rectangle;
+import java.awt.geom.Ellipse2D;
 import java.io.IOException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -72,7 +73,13 @@ public class SatDecayGraphService {
 
     @Value("${height:1080}")
     private int height;
-    
+
+    @Value("${strokeWidth:4.0}")
+    private float strokeWidth;
+
+    @Value("${shapeSize:10.0}")
+    private double shapeSize;
+
     private static String generateSVGForChart(JFreeChart chart, int width, int height) {
         SVGGraphics2D g2 = new SVGGraphics2D(width, height);
         chart.setElementHinting(true);
@@ -96,7 +103,7 @@ public class SatDecayGraphService {
         return result;
     }
 
-    private static JFreeChart createChart(XYDataset dataset, String title) {
+    private JFreeChart createChart(XYDataset dataset, String title) {
         // Time axis, UTC / English
         ValueAxis timeAxis = new DateAxis("Time (UTC)", TimeZone.getTimeZone("UTC"), Locale.ENGLISH);
         timeAxis.setLowerMargin(0.02);
@@ -109,9 +116,12 @@ public class SatDecayGraphService {
         rightAxis.setAutoRangeIncludesZero(false);
 
         // Create plot
+        double delta = shapeSize / 2.0;
         XYLineAndShapeRenderer renderer = new XYLineAndShapeRenderer(true, true);
-        renderer.setDefaultStroke(new BasicStroke(2.0f));
+        renderer.setDefaultStroke(new BasicStroke(strokeWidth));
+        renderer.setDefaultShape(new Ellipse2D.Double(-delta, -delta, shapeSize, shapeSize));
         renderer.setAutoPopulateSeriesStroke(false);
+        renderer.setAutoPopulateSeriesShape(false);
         XYPlot plot = new XYPlot(dataset, timeAxis, leftAxis, renderer);
         plot.setBackgroundPaint(Color.WHITE);
         plot.setRangeAxis(1, rightAxis);
