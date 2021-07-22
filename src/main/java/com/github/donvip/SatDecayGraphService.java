@@ -30,6 +30,8 @@ import org.jfree.chart.axis.DateAxis;
 import org.jfree.chart.axis.NumberAxis;
 import org.jfree.chart.axis.ValueAxis;
 import org.jfree.chart.plot.XYPlot;
+import org.jfree.chart.renderer.xy.AbstractXYItemRenderer;
+import org.jfree.chart.renderer.xy.SamplingXYLineRenderer;
 import org.jfree.chart.renderer.xy.XYLineAndShapeRenderer;
 import org.jfree.data.time.Millisecond;
 import org.jfree.data.time.RegularTimePeriod;
@@ -117,7 +119,9 @@ public class SatDecayGraphService {
 
         // Create plot
         double delta = shapeSize / 2.0;
-        XYLineAndShapeRenderer renderer = new XYLineAndShapeRenderer(true, true);
+        boolean small = dataset.getItemCount(0) < 500;
+        AbstractXYItemRenderer renderer = small ? new XYLineAndShapeRenderer(true, true)
+                : new SatSamplingXYLineRenderer();
         renderer.setDefaultStroke(new BasicStroke(strokeWidth));
         renderer.setDefaultShape(new Ellipse2D.Double(-delta, -delta, shapeSize, shapeSize));
         renderer.setAutoPopulateSeriesStroke(false);
@@ -134,6 +138,14 @@ public class SatDecayGraphService {
         JFreeChart chart = new JFreeChart(title, JFreeChart.DEFAULT_TITLE_FONT, plot, true);
         chart.setBackgroundPaint(Color.WHITE);
         return chart;
+    }
+
+    private static class SatSamplingXYLineRenderer extends SamplingXYLineRenderer {
+        private static final long serialVersionUID = 1L;
+
+        SatSamplingXYLineRenderer() {
+            setTreatLegendShapeAsLine(false);
+        }
     }
 
     private static void apiThrottle() throws InterruptedException {
