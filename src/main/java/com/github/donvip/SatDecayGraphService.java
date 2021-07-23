@@ -1,5 +1,9 @@
 package com.github.donvip;
 
+import static java.util.Comparator.comparing;
+import static java.util.stream.Collectors.toList;
+import static java.util.stream.Collectors.toMap;
+
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Rectangle;
@@ -9,15 +13,16 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Comparator;
+import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TimeZone;
-import java.util.stream.Collectors;
+import java.util.TreeMap;
 import java.util.stream.Stream;
 
 import javax.annotation.PostConstruct;
@@ -44,6 +49,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.databind.JsonMappingException;
 import com.github.donvip.GpHistoryQuery.GpHistory;
 import com.github.donvip.GpHistoryQuery.GpHistoryQueryField;
 import com.stevenpaligo.spacetrack.client.SatCatQuery;
@@ -52,6 +59,8 @@ import com.stevenpaligo.spacetrack.client.SatCatQuery.SatCatQueryField;
 import com.stevenpaligo.spacetrack.client.credential.CredentialProvider;
 import com.stevenpaligo.spacetrack.client.credential.DefaultCredentialProvider;
 import com.stevenpaligo.spacetrack.client.predicate.Equal;
+import com.stevenpaligo.spacetrack.client.predicate.GreaterThan;
+import com.stevenpaligo.spacetrack.client.predicate.LessThan;
 
 @Service
 public class SatDecayGraphService {
@@ -63,6 +72,15 @@ public class SatDecayGraphService {
 
     @Value("${spaceTrackPassword}")
     private String spaceTrackPassword;
+
+    @Value("${plotMode:distinct}")
+    private PlotMode plotMode;
+
+    @Value("${startDate:#{null}}")
+    private Instant startDate;
+
+    @Value("${endDate:#{null}}")
+    private Instant endDate;
 
     @Value("${satIds}")
     private List<Integer> satIds;
@@ -89,9 +107,9 @@ public class SatDecayGraphService {
         return g2.getSVGElement(chart.getID());
     }
 
-    private static XYDataset createDataset(List<GpHistory> history) {
-        final TimeSeries apoapsis = new TimeSeries("Apoapsis");
-        final TimeSeries periapsis = new TimeSeries("Periapsis");
+    private static void addTimeSeries(TimeSeriesCollection collection, List<GpHistory> history, String prefix) {
+        final TimeSeries apoapsis = new TimeSeries(prefix + "Apoapsis");
+        final TimeSeries periapsis = new TimeSeries(prefix + "Periapsis");
 
         for (GpHistory gp : history) {
             RegularTimePeriod date = new Millisecond(Date.from(gp.getEpoch().toInstant()));
@@ -99,9 +117,13 @@ public class SatDecayGraphService {
             periapsis.addOrUpdate(date, gp.getPeriapsis());
         }
 
+        collection.addSeries(apoapsis);
+        collection.addSeries(periapsis);
+    }
+
+    private static XYDataset createDataset(Map<String, List<GpHistory>> histories) {
         TimeSeriesCollection result = new TimeSeriesCollection();
-        result.addSeries(apoapsis);
-        result.addSeries(periapsis);
+        histories.forEach((prefix, history) -> addTimeSeries(result, history, prefix));
         return result;
     }
 
@@ -117,7 +139,7 @@ public class SatDecayGraphService {
         NumberAxis rightAxis = new NumberAxis(null);
         rightAxis.setAutoRangeIncludesZero(false);
 
-        // Create plot
+        // Create plot (downsampling very large data to avoid huge SVG files)
         double delta = shapeSize / 2.0;
         boolean small = dataset.getItemCount(0) < 500;
         AbstractXYItemRenderer renderer = small ? new XYLineAndShapeRenderer(true, true)
@@ -148,36 +170,74 @@ public class SatDecayGraphService {
         }
     }
 
+    private enum PlotMode {
+        combined, distinct;
+    }
+
     private static void apiThrottle() throws InterruptedException {
         // API throttle: Limit API queries to less than 30 requests per minute / 300 requests per hour
         Thread.sleep(2500);
     }
 
+    private List<GpHistory> fetchHistory(Integer id, CredentialProvider credentials)
+            throws JsonParseException, JsonMappingException, IOException {
+        GpHistoryQuery q = new GpHistoryQuery().setCredentials(credentials)
+                .addPredicate(new Equal<>(GpHistoryQueryField.CATALOG_NUMBER, id));
+        if (startDate != null) {
+            q.addPredicate(new GreaterThan<>(GpHistoryQueryField.EPOCH, startDate));
+        }
+        if (endDate != null) {
+            q.addPredicate(new LessThan<>(GpHistoryQueryField.EPOCH, endDate));
+        }
+        return q.execute().stream().sorted(comparing(GpHistory::getEpoch)).collect(toList());
+    }
+
     private void doGenerateGraphs(List<Integer> ids, CredentialProvider credentials, Map<String, String[]> map)
             throws IOException, InterruptedException {
+        Map<String, List<GpHistory>> histories = new TreeMap<>();
         for (Integer id : ids) {
             logger.info("Fetching history for satellite {}", id);
-            List<GpHistory> history = new GpHistoryQuery().setCredentials(credentials)
-                            .addPredicate(new Equal<>(GpHistoryQueryField.CATALOG_NUMBER, id)).execute()
-                            .stream().sorted(Comparator.comparing(GpHistory::getEpoch)).collect(Collectors.toList());
-            if (!history.isEmpty()) {
-                String objectName = history.get(0).getObjectName();
-                String idAsString = id.toString();
-                Optional<String[]> row = map.values().stream().filter(t -> t[2].equals(idAsString)).findFirst();
-                // Celestrak has better names than space-track
-                if (row.isPresent()) {
-                    objectName = row.get()[0];
-                }
-                logger.info("Generating graph for satellite {} - {}", id, objectName);
-                String filename = objectName.replace('/', '-').replace('\\', '-') + " decay.svg";
-                Files.writeString(Path.of(filename), generateSVGForChart(
-                        createChart(createDataset(history), objectName + " altitude"), width, height));
-                logger.info("Graph generated for satellite {}: {}", id, filename);
-            } else {
+            List<GpHistory> history = fetchHistory(id, credentials);
+            if (history.isEmpty()) {
                 logger.error("Unable to generate graph for satellite {}", id);
+            } else {
+                String objectName = findObjectName(map, id, history);
+                switch (plotMode) {
+                case combined:
+                    histories.put(objectName, history);
+                    break;
+                case distinct:
+                    logger.info("Generating graph for satellite {} - {}", id, objectName);
+                    String filename = objectName.replace('/', '-').replace('\\', '-') + " altitude.svg";
+                    Files.writeString(Path.of(filename), generateSVGForChart(
+                            createChart(createDataset(Map.of("", history)), objectName + " altitude"), width, height));
+                    logger.info("Graph generated for satellite {}: {}", id, filename);
+                    break;
+                default:
+                    throw new UnsupportedOperationException(Objects.toString(plotMode));
+                }
             }
             apiThrottle();
         }
+        if (PlotMode.combined == plotMode && !histories.isEmpty()) {
+            Set<String> objectNames = histories.keySet();
+            logger.info("Generating graph for satellites {} - {}", ids, objectNames);
+            String filename = "output.svg";
+            Files.writeString(Path.of(filename), generateSVGForChart(
+                    createChart(createDataset(histories), "Altitude of " + objectNames), width, height));
+            logger.info("Graph generated for satellites {}: {}", ids, filename);
+        }
+    }
+
+    private static String findObjectName(Map<String, String[]> map, Integer id, List<GpHistory> history) {
+        String objectName = history.get(0).getObjectName();
+        String idAsString = id.toString();
+        Optional<String[]> row = map.values().stream().filter(t -> t[2].equals(idAsString)).findFirst();
+        // Celestrak has better names than space-track
+        if (row.isPresent()) {
+            objectName = row.get()[0];
+        }
+        return objectName;
     }
 
     private Map<String, String[]> getCelestrakMapping() throws IOException {
@@ -187,7 +247,7 @@ public class SatDecayGraphService {
             return IOUtils.toString(connection.getInputStream(), StandardCharsets.UTF_8).lines()
                     .map(l -> l.split(","))
                     .filter(t -> t.length >= 3)
-                    .collect(Collectors.toMap(t -> t[1], t -> t));
+                    .collect(toMap(t -> t[1], t -> t));
         } finally {
             connection.disconnect();
         }
@@ -217,7 +277,7 @@ public class SatDecayGraphService {
                 logger.error("Failed to retrieve satcat " + d, e);
                 return Stream.empty();
             }
-        }).filter(Objects::nonNull).distinct().collect(Collectors.toList());
+        }).filter(Objects::nonNull).distinct().collect(toList());
     }
 
     @PostConstruct
