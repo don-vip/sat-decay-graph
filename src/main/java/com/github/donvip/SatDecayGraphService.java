@@ -102,7 +102,6 @@ public class SatDecayGraphService {
 
     private static String generateSVGForChart(JFreeChart chart, int width, int height) {
         SVGGraphics2D g2 = new SVGGraphics2D(width, height);
-        chart.setElementHinting(true);
         chart.draw(g2, new Rectangle(width, height));
         return g2.getSVGElement(chart.getID());
     }
@@ -123,7 +122,7 @@ public class SatDecayGraphService {
 
     private static XYDataset createDataset(Map<String, List<GpHistory>> histories) {
         TimeSeriesCollection result = new TimeSeriesCollection();
-        histories.forEach((prefix, history) -> addTimeSeries(result, history, prefix));
+        histories.forEach((prefix, history) -> addTimeSeries(result, history, prefix.isEmpty() ? prefix : prefix + ' '));
         return result;
     }
 
@@ -223,8 +222,10 @@ public class SatDecayGraphService {
             Set<String> objectNames = histories.keySet();
             logger.info("Generating graph for satellites {} - {}", ids, objectNames);
             String filename = "output.svg";
-            Files.writeString(Path.of(filename), generateSVGForChart(
-                    createChart(createDataset(histories), "Altitude of " + objectNames), width, height));
+            Files.writeString(Path.of(filename),
+                    generateSVGForChart(
+                            createChart(createDataset(histories), "Altitude of " + String.join(", ", objectNames)),
+                            width, height));
             logger.info("Graph generated for satellites {}: {}", ids, filename);
         }
     }
