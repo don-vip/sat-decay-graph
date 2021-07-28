@@ -80,7 +80,7 @@ public class SatDecayGraphService {
     @Value("${combinedFileName:output.svg}")
     private String combinedFileName;
 
-    @Value("${domainGridlinesVisible:true}")
+    @Value("${domainGridlinesVisible:false}")
     private boolean domainGridlinesVisible;
 
     @Value("${rangeGridlinesVisible:false}")
