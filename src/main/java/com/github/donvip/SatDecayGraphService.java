@@ -30,6 +30,7 @@ import javax.net.ssl.HttpsURLConnection;
 
 import org.apache.commons.io.IOUtils;
 import org.jfree.chart.JFreeChart;
+import org.jfree.chart.LegendItemCollection;
 import org.jfree.chart.axis.AxisLocation;
 import org.jfree.chart.axis.DateAxis;
 import org.jfree.chart.axis.NumberAxis;
@@ -76,6 +77,15 @@ public class SatDecayGraphService {
     @Value("${plotMode:distinct}")
     private PlotMode plotMode;
 
+    @Value("${combinedFileName:output.svg}")
+    private String combinedFileName;
+
+    @Value("${domainGridlinesVisible:true}")
+    private boolean domainGridlinesVisible;
+
+    @Value("${rangeGridlinesVisible:false}")
+    private boolean rangeGridlinesVisible;
+
     @Value("${startDate:#{null}}")
     private Instant startDate;
 
@@ -106,9 +116,10 @@ public class SatDecayGraphService {
         return g2.getSVGElement(chart.getID());
     }
 
-    private static void addTimeSeries(TimeSeriesCollection collection, List<GpHistory> history, String prefix) {
-        final TimeSeries apoapsis = new TimeSeries(prefix + "Apoapsis");
-        final TimeSeries periapsis = new TimeSeries(prefix + "Periapsis");
+    private static void addTimeSeries(TimeSeriesCollection apoApsisCollection, TimeSeriesCollection periApsisCollection,
+            List<GpHistory> history, String prefix, boolean distinguish) {
+        final TimeSeries apoapsis = new TimeSeries(prefix + (distinguish ? "Apoapsis" : ""));
+        final TimeSeries periapsis = new TimeSeries(prefix + (distinguish ? "Periapsis" : ""));
 
         for (GpHistory gp : history) {
             RegularTimePeriod date = new Millisecond(Date.from(gp.getEpoch().toInstant()));
@@ -116,17 +127,40 @@ public class SatDecayGraphService {
             periapsis.addOrUpdate(date, gp.getPeriapsis());
         }
 
-        collection.addSeries(apoapsis);
-        collection.addSeries(periapsis);
+        apoApsisCollection.addSeries(apoapsis);
+        periApsisCollection.addSeries(periapsis);
     }
 
-    private static XYDataset createDataset(Map<String, List<GpHistory>> histories) {
-        TimeSeriesCollection result = new TimeSeriesCollection();
-        histories.forEach((prefix, history) -> addTimeSeries(result, history, prefix.isEmpty() ? prefix : prefix + ' '));
-        return result;
+    /**
+     * Creates one or two datasets, based on the {@code distringuish} parameter
+     *
+     * @param histories List of GP_HISTORY records returned by Space-Track API
+     * @param distinguish if {@code true}, creates a single data set where apoapsis
+     *            and periapsis series have distinguished names. If {@code false},
+     *            creates two datasets where apoapsis and periapsis have the same
+     *            name. The use of two datasets allow to render the plot with the
+     *            same colors for both series.
+     * @return the created datasets
+     */
+    private static List<XYDataset> createDatasets(Map<String, List<GpHistory>> histories, boolean distinguish) {
+        TimeSeriesCollection apoapsis = new TimeSeriesCollection();
+        TimeSeriesCollection periapsis = new TimeSeriesCollection();
+        histories.forEach((prefix, history) -> addTimeSeries(apoapsis, distinguish ? apoapsis : periapsis, history,
+                prefix.isEmpty() ? prefix : prefix + ' ', distinguish));
+        return distinguish ? List.of(apoapsis) : List.of(apoapsis, periapsis);
     }
 
-    private JFreeChart createChart(XYDataset dataset, String title) {
+    private JFreeChart createChart(List<XYDataset> datasets, String title) {
+        // Create plot (downsampling very large data to avoid huge SVG files)
+        XYPlot plot = createPlot(datasets);
+
+        // Create and return chart
+        JFreeChart chart = new JFreeChart(title, JFreeChart.DEFAULT_TITLE_FONT, plot, true);
+        chart.setBackgroundPaint(Color.WHITE);
+        return chart;
+    }
+
+    private XYPlot createPlot(List<XYDataset> datasets) {
         // Time axis, UTC / English
         ValueAxis timeAxis = new DateAxis("Time (UTC)", TimeZone.getTimeZone("UTC"), Locale.ENGLISH);
         timeAxis.setLowerMargin(0.02);
@@ -140,25 +174,43 @@ public class SatDecayGraphService {
 
         // Create plot (downsampling very large data to avoid huge SVG files)
         double delta = shapeSize / 2.0;
-        boolean small = dataset.getItemCount(0) < 500;
+        boolean small = datasets.get(0).getItemCount(0) < 500;
+        AbstractXYItemRenderer renderer = createRenderer(small, delta);
+
+        // If multiple datasets, assume they have the same series and we want only to
+        // show series of first dataset in legend
+        XYPlot plot = new XYPlot(datasets.get(0), timeAxis, leftAxis, renderer);
+        int datasetsSize = datasets.size();
+        if (datasetsSize > 1) {
+            LegendItemCollection legendItems = new LegendItemCollection();
+            for (int i = 0; i < datasets.get(0).getSeriesCount(); i++) {
+                legendItems.add(renderer.getLegendItem(0, i));
+            }
+            plot.setFixedLegendItems(legendItems);
+            for (int i = 1; i < datasetsSize; i++) {
+                plot.setDataset(i, datasets.get(i));
+            }
+        }
+        plot.setBackgroundPaint(Color.WHITE);
+        plot.setRangeAxis(1, rightAxis);
+        plot.setRangeAxisLocation(1, AxisLocation.TOP_OR_RIGHT);
+        plot.setDomainGridlinesVisible(domainGridlinesVisible);
+        plot.setRangeGridlinesVisible(rangeGridlinesVisible);
+
+        // Ensure both axes have the same range
+        rightAxis.setRange(leftAxis.getRange(), false, false);
+
+        return plot;
+    }
+
+    private AbstractXYItemRenderer createRenderer(boolean small, double delta) {
         AbstractXYItemRenderer renderer = small ? new XYLineAndShapeRenderer(true, true)
                 : new SatSamplingXYLineRenderer();
         renderer.setDefaultStroke(new BasicStroke(strokeWidth));
         renderer.setDefaultShape(new Ellipse2D.Double(-delta, -delta, shapeSize, shapeSize));
         renderer.setAutoPopulateSeriesStroke(false);
         renderer.setAutoPopulateSeriesShape(false);
-        XYPlot plot = new XYPlot(dataset, timeAxis, leftAxis, renderer);
-        plot.setBackgroundPaint(Color.WHITE);
-        plot.setRangeAxis(1, rightAxis);
-        plot.setRangeAxisLocation(1, AxisLocation.TOP_OR_RIGHT);
-
-        // Ensure both axes have the same range
-        rightAxis.setRange(leftAxis.getRange(), false, false);
-
-        // Create and return chart
-        JFreeChart chart = new JFreeChart(title, JFreeChart.DEFAULT_TITLE_FONT, plot, true);
-        chart.setBackgroundPaint(Color.WHITE);
-        return chart;
+        return renderer;
     }
 
     private static class SatSamplingXYLineRenderer extends SamplingXYLineRenderer {
@@ -198,7 +250,7 @@ public class SatDecayGraphService {
             logger.info("Fetching history for satellite {}", id);
             List<GpHistory> history = fetchHistory(id, credentials);
             if (history.isEmpty()) {
-                logger.error("Unable to generate graph for satellite {}", id);
+                logger.error("Unable to generate graph for satellite {} (empty history)", id);
             } else {
                 String objectName = findObjectName(map, id, history);
                 switch (plotMode) {
@@ -209,7 +261,8 @@ public class SatDecayGraphService {
                     logger.info("Generating graph for satellite {} - {}", id, objectName);
                     String filename = objectName.replace('/', '-').replace('\\', '-') + " altitude.svg";
                     Files.writeString(Path.of(filename), generateSVGForChart(
-                            createChart(createDataset(Map.of("", history)), objectName + " altitude"), width, height));
+                            createChart(createDatasets(Map.of("", history), true), objectName + " altitude"), width,
+                            height));
                     logger.info("Graph generated for satellite {}: {}", id, filename);
                     break;
                 default:
@@ -221,12 +274,12 @@ public class SatDecayGraphService {
         if (PlotMode.combined == plotMode && !histories.isEmpty()) {
             Set<String> objectNames = histories.keySet();
             logger.info("Generating graph for satellites {} - {}", ids, objectNames);
-            String filename = "output.svg";
-            Files.writeString(Path.of(filename),
+            Files.writeString(Path.of(combinedFileName),
                     generateSVGForChart(
-                            createChart(createDataset(histories), "Altitude of " + String.join(", ", objectNames)),
+                            createChart(createDatasets(histories, false),
+                                    "Altitude of " + String.join(", ", objectNames)),
                             width, height));
-            logger.info("Graph generated for satellites {}: {}", ids, filename);
+            logger.info("Graph generated for satellites {}: {}", ids, combinedFileName);
         }
     }
 
@@ -258,7 +311,8 @@ public class SatDecayGraphService {
         return satIntlDes.stream().flatMap(d -> {
             try {
                 Integer catalogNumber = null;
-                final String id = map.get(d)[2];
+                String[] strings = map.get(d);
+                final String id = strings == null ? null : strings[2];
                 if (id != null && !id.isBlank()) {
                     catalogNumber = Integer.valueOf(id);
                 } else {
