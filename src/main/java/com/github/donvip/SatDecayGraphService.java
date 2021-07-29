@@ -92,6 +92,9 @@ public class SatDecayGraphService {
     @Value("${endDate:#{null}}")
     private Instant endDate;
 
+    @Value("${minAltitude:0.0}")
+    private double minAltitude;
+
     @Value("${satIds}")
     private List<Integer> satIds;
 
@@ -239,6 +242,9 @@ public class SatDecayGraphService {
         }
         if (endDate != null) {
             q.addPredicate(new LessThan<>(GpHistoryQueryField.EPOCH, endDate));
+        }
+        if (minAltitude < 0.0 || minAltitude > 0.0) {
+            q.addPredicate(new GreaterThan<>(GpHistoryQueryField.PERIAPSIS, minAltitude));
         }
         return q.execute().stream().sorted(comparing(GpHistory::getEpoch)).collect(toList());
     }

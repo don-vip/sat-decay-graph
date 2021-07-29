@@ -76,6 +76,22 @@ public class GpHistoryQuery extends Query<GpHistoryQueryField, GpHistory, GpHist
       public String getQueryFieldName() {
         return "EPOCH";
       }
+    },
+
+    APOAPSIS {
+
+      @Override
+      public String getQueryFieldName() {
+        return "APOAPSIS";
+      }
+    },
+
+    PERIAPSIS {
+
+      @Override
+      public String getQueryFieldName() {
+        return "PERIAPSIS";
+      }
     }
   }
 
