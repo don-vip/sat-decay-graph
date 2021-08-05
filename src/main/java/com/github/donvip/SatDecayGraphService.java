@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -102,10 +103,10 @@ public class SatDecayGraphService {
     @Value("${minAltitude:0.0}")
     private double minAltitude;
 
-    @Value("${satIds}")
+    @Value("${satIds:#{T(java.util.Collections).emptyList()}}")
     private List<Integer> satIds;
 
-    @Value("${satIntlDes}")
+    @Value("${satIntlDes:#{T(java.util.Collections).emptyList()}}")
     private List<String> satIntlDes;
 
     @Value("${width:1920}")
@@ -126,26 +127,39 @@ public class SatDecayGraphService {
     @Value("${debug:false}")
     private boolean debug;
 
+    @Value("#{${overrides:T(java.util.Collections).emptyMap()}}")
+    private Map<Integer, Integer> overrides;
+
     private static String generateSVGForChart(JFreeChart chart, int width, int height) {
         SVGGraphics2D g2 = new SVGGraphics2D(width, height);
         chart.draw(g2, new Rectangle(width, height));
         return g2.getSVGElement(chart.getID());
     }
 
-    private static void addTimeSeries(TimeSeriesCollection apoApsisCollection, TimeSeriesCollection periApsisCollection,
-            List<GpHistory> history, String prefix, boolean distinguish) {
-        final TimeSeries apoapsis = new TimeSeries(prefix + (distinguish ? "Apoapsis" : ""));
-        final TimeSeries periapsis = new TimeSeries(prefix + (distinguish ? "Periapsis" : ""));
+    private void addTimeSeries(TimeSeriesCollection apoApsisCollection, TimeSeriesCollection periApsisCollection,
+            List<GpHistory> history, String prefix, Integer objectId, boolean distinguish,
+            List<GpHistory> overridenHistories) {
+        final TimeSeries apoapsis = new IdentifiedTimeSeries(objectId, prefix + (distinguish ? "Apoapsis" : ""));
+        final TimeSeries periapsis = new IdentifiedTimeSeries(objectId, prefix + (distinguish ? "Periapsis" : ""));
 
         for (GpHistory gp : history) {
-            String label = gp.getGpId().toString();
-            RegularTimePeriod date = new Millisecond(Date.from(gp.getEpoch().toInstant()));
-            apoapsis.addOrUpdate(new LabeledTimeSeriesDataItem(date, gp.getApoapsis(), label));
-            periapsis.addOrUpdate(new LabeledTimeSeriesDataItem(date, gp.getPeriapsis(), label));
+            Integer overridenObjectId = overrides.get(gp.getGpId());
+            if (overridenObjectId == null || overridenObjectId.equals(objectId)) {
+                addApoapsisAndPeriapsis(apoapsis, periapsis, gp);
+            } else {
+                overridenHistories.add(gp);
+            }
         }
 
         apoApsisCollection.addSeries(apoapsis);
         periApsisCollection.addSeries(periapsis);
+    }
+
+    private static void addApoapsisAndPeriapsis(final TimeSeries apoapsis, final TimeSeries periapsis, GpHistory gp) {
+        String label = gp.getGpId().toString();
+        RegularTimePeriod date = new Millisecond(Date.from(gp.getEpoch().toInstant()));
+        apoapsis.addOrUpdate(new LabeledTimeSeriesDataItem(date, gp.getApoapsis(), label));
+        periapsis.addOrUpdate(new LabeledTimeSeriesDataItem(date, gp.getPeriapsis(), label));
     }
 
     /**
@@ -165,12 +179,25 @@ public class SatDecayGraphService {
             Map<Integer, String> names, boolean distinguish) {
         TimeSeriesCollection apoapsis = new TimeSeriesCollection();
         TimeSeriesCollection periapsis = new TimeSeriesCollection();
+        List<GpHistory> overridenHistories = new ArrayList<>();
         histories.forEach((id, history) -> {
             String name = useNameInLegend ? names.get(id) : id.toString();
-            addTimeSeries(apoapsis, distinguish ? apoapsis : periapsis, history, name.isEmpty() ? name : name + ' ',
-                    distinguish);
+            addTimeSeries(apoapsis, distinguish ? apoapsis : periapsis, history, name.isEmpty() ? name : name + ' ', id,
+                    distinguish, overridenHistories);
+        });
+        overridenHistories.forEach(gp -> {
+            Integer id = overrides.get(gp.getGpId());
+            List<IdentifiedTimeSeries> apoapsises = findSeries(apoapsis, id);
+            addApoapsisAndPeriapsis(apoapsises.get(0),
+                    distinguish ? apoapsises.get(1) : findSeries(periapsis, id).get(0), gp);
         });
         return distinguish ? List.of(apoapsis) : List.of(apoapsis, periapsis);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<IdentifiedTimeSeries> findSeries(TimeSeriesCollection collection, Integer objectId) {
+        return (List<IdentifiedTimeSeries>) collection.getSeries().stream()
+                .filter(s -> ((IdentifiedTimeSeries) s).getObjectId().equals(objectId)).collect(toList());
     }
 
     private JFreeChart createChart(List<TimeSeriesCollection> datasets, String title) {
