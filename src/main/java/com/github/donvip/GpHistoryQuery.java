@@ -96,7 +96,7 @@ public class GpHistoryQuery extends Query<GpHistoryQueryField, GpHistory, GpHist
   }
 
   /**
-   * FClass representing results returned from "gp_history information" queries on <a href="https://www.space-track.org/">Space-Track.org</a>.
+   * Class representing results returned from "gp_history information" queries on <a href="https://www.space-track.org/">Space-Track.org</a>.
    */
   @Getter
   @Setter

@@ -3,9 +3,12 @@ package com.github.donvip;
 import static java.util.Comparator.comparing;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toMap;
+import static java.util.stream.Collectors.toSet;
 
 import java.awt.BasicStroke;
 import java.awt.Color;
+import java.awt.Desktop;
+import java.awt.HeadlessException;
 import java.awt.Rectangle;
 import java.awt.geom.Ellipse2D;
 import java.io.IOException;
@@ -23,6 +26,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TimeZone;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.stream.Stream;
 
 import javax.annotation.PostConstruct;
@@ -86,6 +90,9 @@ public class SatDecayGraphService {
     @Value("${rangeGridlinesVisible:false}")
     private boolean rangeGridlinesVisible;
 
+    @Value("${useNameInLegend:true}")
+    private boolean useNameInLegend;
+
     @Value("${startDate:#{null}}")
     private Instant startDate;
 
@@ -113,6 +120,9 @@ public class SatDecayGraphService {
     @Value("${shapeSize:10.0}")
     private double shapeSize;
 
+    @Value("${openFile:false}")
+    private boolean openFile;
+
     private static String generateSVGForChart(JFreeChart chart, int width, int height) {
         SVGGraphics2D g2 = new SVGGraphics2D(width, height);
         chart.draw(g2, new Rectangle(width, height));
@@ -137,7 +147,9 @@ public class SatDecayGraphService {
     /**
      * Creates one or two datasets, based on the {@code distringuish} parameter
      *
-     * @param histories List of GP_HISTORY records returned by Space-Track API
+     * @param histories Map of GP_HISTORY records per object id, as returned by
+     *            Space-Track API
+     * @param names Map of object names per object id
      * @param distinguish if {@code true}, creates a single data set where apoapsis
      *            and periapsis series have distinguished names. If {@code false},
      *            creates two datasets where apoapsis and periapsis have the same
@@ -145,11 +157,15 @@ public class SatDecayGraphService {
      *            same colors for both series.
      * @return the created datasets
      */
-    private static List<XYDataset> createDatasets(Map<String, List<GpHistory>> histories, boolean distinguish) {
+    private List<XYDataset> createDatasets(Map<Integer, List<GpHistory>> histories, Map<Integer, String> names,
+            boolean distinguish) {
         TimeSeriesCollection apoapsis = new TimeSeriesCollection();
         TimeSeriesCollection periapsis = new TimeSeriesCollection();
-        histories.forEach((prefix, history) -> addTimeSeries(apoapsis, distinguish ? apoapsis : periapsis, history,
-                prefix.isEmpty() ? prefix : prefix + ' ', distinguish));
+        histories.forEach((id, history) -> {
+            String name = useNameInLegend ? names.get(id) : id.toString();
+            addTimeSeries(apoapsis, distinguish ? apoapsis : periapsis, history, name.isEmpty() ? name : name + ' ',
+                    distinguish);
+        });
         return distinguish ? List.of(apoapsis) : List.of(apoapsis, periapsis);
     }
 
@@ -230,7 +246,7 @@ public class SatDecayGraphService {
 
     private static void apiThrottle() throws InterruptedException {
         // API throttle: Limit API queries to less than 30 requests per minute / 300 requests per hour
-        Thread.sleep(2500);
+        Thread.sleep(3333);
     }
 
     private List<GpHistory> fetchHistory(Integer id, CredentialProvider credentials)
@@ -251,7 +267,8 @@ public class SatDecayGraphService {
 
     private void doGenerateGraphs(List<Integer> ids, CredentialProvider credentials, Map<String, String[]> map)
             throws IOException, InterruptedException {
-        Map<String, List<GpHistory>> histories = new TreeMap<>();
+        Map<Integer, String> names = new TreeMap<>();
+        Map<Integer, List<GpHistory>> histories = new TreeMap<>();
         for (Integer id : ids) {
             logger.info("Fetching history for satellite {}", id);
             List<GpHistory> history = fetchHistory(id, credentials);
@@ -259,17 +276,20 @@ public class SatDecayGraphService {
                 logger.error("Unable to generate graph for satellite {} (empty history)", id);
             } else {
                 String objectName = findObjectName(map, id, history);
+                names.put(id, objectName);
                 switch (plotMode) {
                 case combined:
-                    histories.put(objectName, history);
+                    histories.put(id, history);
                     break;
                 case distinct:
                     logger.info("Generating graph for satellite {} - {}", id, objectName);
                     String filename = objectName.replace('/', '-').replace('\\', '-') + " altitude.svg";
                     Files.writeString(Path.of(filename), generateSVGForChart(
-                            createChart(createDatasets(Map.of("", history), true), objectName + " altitude"), width,
-                            height));
+                            createChart(createDatasets(Map.of(id, history), Map.of(id, objectName), true),
+                                    objectName + " altitude"),
+                            width, height));
                     logger.info("Graph generated for satellite {}: {}", id, filename);
+                    openGraph(filename);
                     break;
                 default:
                     throw new UnsupportedOperationException(Objects.toString(plotMode));
@@ -278,14 +298,25 @@ public class SatDecayGraphService {
             apiThrottle();
         }
         if (PlotMode.combined == plotMode && !histories.isEmpty()) {
-            Set<String> objectNames = histories.keySet();
+            Set<String> objectNames = new TreeSet<>(names.values().stream().collect(toSet()));
             logger.info("Generating graph for satellites {} - {}", ids, objectNames);
             Files.writeString(Path.of(combinedFileName),
                     generateSVGForChart(
-                            createChart(createDatasets(histories, false),
+                            createChart(createDatasets(histories, names, false),
                                     "Altitude of " + String.join(", ", objectNames)),
                             width, height));
             logger.info("Graph generated for satellites {}: {}", ids, combinedFileName);
+            openGraph(combinedFileName);
+        }
+    }
+
+    private void openGraph(String filename) throws IOException {
+        if (openFile) {
+            try {
+                Desktop.getDesktop().browse(Path.of(filename).toUri());
+            } catch (HeadlessException e) {
+                Runtime.getRuntime().exec(String.format("cmd /c start %s", filename));
+            }
         }
     }
 
