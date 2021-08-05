@@ -47,7 +47,7 @@ import org.jfree.data.time.Millisecond;
 import org.jfree.data.time.RegularTimePeriod;
 import org.jfree.data.time.TimeSeries;
 import org.jfree.data.time.TimeSeriesCollection;
-import org.jfree.data.xy.XYDataset;
+import org.jfree.data.time.TimeSeriesDataItem;
 import org.jfree.svg.SVGGraphics2D;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -123,6 +123,9 @@ public class SatDecayGraphService {
     @Value("${openFile:false}")
     private boolean openFile;
 
+    @Value("${debug:false}")
+    private boolean debug;
+
     private static String generateSVGForChart(JFreeChart chart, int width, int height) {
         SVGGraphics2D g2 = new SVGGraphics2D(width, height);
         chart.draw(g2, new Rectangle(width, height));
@@ -135,9 +138,10 @@ public class SatDecayGraphService {
         final TimeSeries periapsis = new TimeSeries(prefix + (distinguish ? "Periapsis" : ""));
 
         for (GpHistory gp : history) {
+            String label = gp.getGpId().toString();
             RegularTimePeriod date = new Millisecond(Date.from(gp.getEpoch().toInstant()));
-            apoapsis.addOrUpdate(date, gp.getApoapsis());
-            periapsis.addOrUpdate(date, gp.getPeriapsis());
+            apoapsis.addOrUpdate(new LabeledTimeSeriesDataItem(date, gp.getApoapsis(), label));
+            periapsis.addOrUpdate(new LabeledTimeSeriesDataItem(date, gp.getPeriapsis(), label));
         }
 
         apoApsisCollection.addSeries(apoapsis);
@@ -157,8 +161,8 @@ public class SatDecayGraphService {
      *            same colors for both series.
      * @return the created datasets
      */
-    private List<XYDataset> createDatasets(Map<Integer, List<GpHistory>> histories, Map<Integer, String> names,
-            boolean distinguish) {
+    private List<TimeSeriesCollection> createDatasets(Map<Integer, List<GpHistory>> histories,
+            Map<Integer, String> names, boolean distinguish) {
         TimeSeriesCollection apoapsis = new TimeSeriesCollection();
         TimeSeriesCollection periapsis = new TimeSeriesCollection();
         histories.forEach((id, history) -> {
@@ -169,7 +173,7 @@ public class SatDecayGraphService {
         return distinguish ? List.of(apoapsis) : List.of(apoapsis, periapsis);
     }
 
-    private JFreeChart createChart(List<XYDataset> datasets, String title) {
+    private JFreeChart createChart(List<TimeSeriesCollection> datasets, String title) {
         // Create plot (downsampling very large data to avoid huge SVG files)
         XYPlot plot = createPlot(datasets);
 
@@ -179,7 +183,7 @@ public class SatDecayGraphService {
         return chart;
     }
 
-    private XYPlot createPlot(List<XYDataset> datasets) {
+    private XYPlot createPlot(List<TimeSeriesCollection> datasets) {
         // Time axis, UTC / English
         ValueAxis timeAxis = new DateAxis("Time (UTC)", TimeZone.getTimeZone("UTC"), Locale.ENGLISH);
         timeAxis.setLowerMargin(0.02);
@@ -229,6 +233,16 @@ public class SatDecayGraphService {
         renderer.setDefaultShape(new Ellipse2D.Double(-delta, -delta, shapeSize, shapeSize));
         renderer.setAutoPopulateSeriesStroke(false);
         renderer.setAutoPopulateSeriesShape(false);
+        renderer.setDefaultItemLabelsVisible(debug);
+        renderer.setDefaultItemLabelGenerator((dataset, series, item) -> {
+            if (dataset instanceof TimeSeriesCollection) {
+                TimeSeriesDataItem dataItem = ((TimeSeriesCollection) dataset).getSeries(series).getDataItem(item);
+                if (dataItem instanceof LabeledTimeSeriesDataItem) {
+                    return ((LabeledTimeSeriesDataItem) dataItem).getLabel();
+                }
+            }
+            return null;
+        });
         return renderer;
     }
 
