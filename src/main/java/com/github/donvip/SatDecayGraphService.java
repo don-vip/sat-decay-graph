@@ -67,6 +67,7 @@ import com.stevenpaligo.spacetrack.client.credential.DefaultCredentialProvider;
 import com.stevenpaligo.spacetrack.client.predicate.Equal;
 import com.stevenpaligo.spacetrack.client.predicate.GreaterThan;
 import com.stevenpaligo.spacetrack.client.predicate.LessThan;
+import com.stevenpaligo.spacetrack.client.predicate.StartsWith;
 
 @Service
 public class SatDecayGraphService {
@@ -91,6 +92,15 @@ public class SatDecayGraphService {
     @Value("${rangeGridlinesVisible:false}")
     private boolean rangeGridlinesVisible;
 
+    @Value("${showApoapsis:true}")
+    private boolean showApoapsis;
+
+    @Value("${showPeriapsis:true}")
+    private boolean showPeriapsis;
+
+    @Value("${showLegend:true}")
+    private boolean showLegend;
+
     @Value("${useNameInLegend:true}")
     private boolean useNameInLegend;
 
@@ -103,11 +113,11 @@ public class SatDecayGraphService {
     @Value("${minAltitude:0.0}")
     private double minAltitude;
 
-    @Value("${satIds:#{T(java.util.Collections).emptyList()}}")
-    private List<Integer> satIds;
-
     @Value("${satIntlDes:#{T(java.util.Collections).emptyList()}}")
     private List<String> satIntlDes;
+
+    @Value("${satIntlDesExcl:#{T(java.util.Collections).emptyList()}}")
+    private List<String> satIntlDesExcl;
 
     @Value("${width:1920}")
     private int width;
@@ -155,11 +165,15 @@ public class SatDecayGraphService {
         periApsisCollection.addSeries(periapsis);
     }
 
-    private static void addApoapsisAndPeriapsis(final TimeSeries apoapsis, final TimeSeries periapsis, GpHistory gp) {
+    private void addApoapsisAndPeriapsis(final TimeSeries apoapsis, final TimeSeries periapsis, GpHistory gp) {
         String label = gp.getGpId().toString();
         RegularTimePeriod date = new Millisecond(Date.from(gp.getEpoch().toInstant()));
-        apoapsis.addOrUpdate(new LabeledTimeSeriesDataItem(date, gp.getApoapsis(), label));
-        periapsis.addOrUpdate(new LabeledTimeSeriesDataItem(date, gp.getPeriapsis(), label));
+        if (showApoapsis) {
+            apoapsis.addOrUpdate(new LabeledTimeSeriesDataItem(date, gp.getApoapsis(), label));
+        }
+        if (showPeriapsis) {
+            periapsis.addOrUpdate(new LabeledTimeSeriesDataItem(date, gp.getPeriapsis(), label));
+        }
     }
 
     /**
@@ -205,7 +219,7 @@ public class SatDecayGraphService {
         XYPlot plot = createPlot(datasets);
 
         // Create and return chart
-        JFreeChart chart = new JFreeChart(title, JFreeChart.DEFAULT_TITLE_FONT, plot, true);
+        JFreeChart chart = new JFreeChart(title, JFreeChart.DEFAULT_TITLE_FONT, plot, showLegend);
         chart.setBackgroundPaint(Color.WHITE);
         return chart;
     }
@@ -258,6 +272,7 @@ public class SatDecayGraphService {
                 : new SatSamplingXYLineRenderer();
         renderer.setDefaultStroke(new BasicStroke(strokeWidth));
         renderer.setDefaultShape(new Ellipse2D.Double(-delta, -delta, shapeSize, shapeSize));
+        renderer.setDataBoundsIncludesVisibleSeriesOnly(false);
         renderer.setAutoPopulateSeriesStroke(false);
         renderer.setAutoPopulateSeriesShape(false);
         renderer.setDefaultItemLabelsVisible(debug);
@@ -317,6 +332,7 @@ public class SatDecayGraphService {
                 logger.error("Unable to generate graph for satellite {} (empty history)", id);
             } else {
                 String objectName = findObjectName(map, id, history);
+                logger.info("Found {} gp_history records for satellite {} - {}", history.size(), id, objectName);
                 names.put(id, objectName);
                 switch (plotMode) {
                 case combined:
@@ -344,7 +360,9 @@ public class SatDecayGraphService {
             Files.writeString(Path.of(combinedFileName),
                     generateSVGForChart(
                             createChart(createDatasets(histories, names, false),
-                                    "Altitude of " + String.join(", ", objectNames)),
+                                    (showApoapsis && showPeriapsis ? "Altitude of "
+                                            : showApoapsis ? "Apoapsis of " : "Periapsis of ")
+                                            + String.join(", ", objectNames)),
                             width, height));
             logger.info("Graph generated for satellites {}: {}", ids, combinedFileName);
             openGraph(combinedFileName);
@@ -388,24 +406,7 @@ public class SatDecayGraphService {
     private List<Integer> getSatIdsFromSatIntDes(Map<String, String[]> map, CredentialProvider credentials) {
         return satIntlDes.stream().flatMap(d -> {
             try {
-                Integer catalogNumber = null;
-                String[] strings = map.get(d);
-                final String id = strings == null ? null : strings[2];
-                if (id != null && !id.isBlank()) {
-                    catalogNumber = Integer.valueOf(id);
-                } else {
-                    List<SatCat> satcat = new SatCatQuery().setCredentials(credentials)
-                            .addPredicate(new Equal<>(SatCatQueryField.INTERNATIONAL_DESIGNATOR, d.trim())).execute();
-                    if (!satcat.isEmpty()) {
-                        catalogNumber = satcat.get(0).getCatalogNumber();
-                    }
-                    apiThrottle();
-                }
-                if (catalogNumber != null) {
-                    logger.info("Mapped satellite international designator {} to catalog number {}", d, catalogNumber);
-                    return Stream.of(catalogNumber);
-                }
-                return Stream.empty();
+                return d.endsWith("*") ? mapMultiId(d, map, credentials) : mapSingleId(d, map, credentials);
             } catch (IOException | InterruptedException | NumberFormatException e) {
                 logger.error("Failed to retrieve satcat " + d, e);
                 return Stream.empty();
@@ -413,13 +414,60 @@ public class SatDecayGraphService {
         }).filter(Objects::nonNull).distinct().collect(toList());
     }
 
+    private static Stream<Integer> mapSingleId(String d, Map<String, String[]> map, CredentialProvider credentials)
+            throws JsonParseException, JsonMappingException, IOException, InterruptedException {
+        Integer catalogNumber = null;
+        String[] strings = map.get(d.trim());
+        final String id = strings == null ? null : strings[2];
+        if (id != null && !id.isBlank()) {
+            catalogNumber = Integer.valueOf(id);
+        } else {
+            List<SatCat> satcat = new SatCatQuery().setCredentials(credentials)
+                    .addPredicate(new Equal<>(SatCatQueryField.INTERNATIONAL_DESIGNATOR, d.trim())).execute();
+            if (!satcat.isEmpty()) {
+                catalogNumber = satcat.get(0).getCatalogNumber();
+            }
+            apiThrottle();
+        }
+        if (catalogNumber != null) {
+            logger.info("Mapped satellite international designator {} to catalog number {}", d, catalogNumber);
+            return Stream.of(catalogNumber);
+        }
+        return Stream.empty();
+    }
+
+    private Stream<Integer> mapMultiId(String d, Map<String, String[]> map, CredentialProvider credentials)
+            throws InterruptedException, JsonParseException, JsonMappingException, IOException {
+        String des = d.substring(0, d.lastIndexOf('*')).trim();
+
+        List<Integer> catalogNumbers = map.entrySet().stream()
+                .filter(e -> !satIntlDesExcl.contains(e.getKey()) && e.getKey().startsWith(des)).map(e -> {
+            String[] strings = e.getValue();
+            String id = strings == null ? null : strings[2];
+            return id != null && !id.isBlank() ? Integer.valueOf(id) : null;
+        }).filter(Objects::nonNull).sorted().collect(toList());
+
+        if (catalogNumbers.isEmpty()) {
+            catalogNumbers = new SatCatQuery().setCredentials(credentials)
+                    .addPredicate(new StartsWith<>(SatCatQueryField.INTERNATIONAL_DESIGNATOR, des)).execute()
+                    .stream().filter(s -> !satIntlDesExcl.contains(s.getInternationalDesignator()))
+                    .map(SatCat::getCatalogNumber).sorted().collect(toList());
+            apiThrottle();
+        }
+
+        if (!catalogNumbers.isEmpty()) {
+            logger.info("Mapped satellite international designator pattern {} to catalog numbers {}", d, catalogNumbers);
+            return catalogNumbers.stream();
+        }
+        return Stream.empty();
+    }
+
     @PostConstruct
     public void generateGraphs() throws IOException, InterruptedException {
-        CredentialProvider credentials = new DefaultCredentialProvider(spaceTrackLogin, spaceTrackPassword);
-        // SpaceTrack API has a very restrictive API Throttling, so download a mapping from CelesTrak first
-        Map<String, String[]> map = getCelestrakMapping();
-        doGenerateGraphs(satIds, credentials, map);
         if (!satIntlDes.isEmpty()) {
+            CredentialProvider credentials = new DefaultCredentialProvider(spaceTrackLogin, spaceTrackPassword);
+            // SpaceTrack API has a very restrictive API Throttling, so download a mapping from CelesTrak first
+            Map<String, String[]> map = getCelestrakMapping();
             doGenerateGraphs(getSatIdsFromSatIntDes(map, credentials), credentials, map);
         }
     }
