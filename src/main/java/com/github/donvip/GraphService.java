@@ -46,8 +46,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.ApplicationListener;
 import org.springframework.stereotype.Service;
 
 import com.fasterxml.jackson.core.JsonParseException;
@@ -55,7 +53,7 @@ import com.fasterxml.jackson.databind.JsonMappingException;
 import com.github.donvip.GpHistoryQuery.GpHistory;
 
 @Service
-public class GraphService implements ApplicationListener<ApplicationReadyEvent> {
+public class GraphService {
 
     private static final Logger logger = LoggerFactory.getLogger(GraphService.class);
 
@@ -405,18 +403,12 @@ public class GraphService implements ApplicationListener<ApplicationReadyEvent> 
         return Stream.empty();
     }
 
-    @Override
-    public void onApplicationEvent(ApplicationReadyEvent event) {
+    public void generateGraphs() throws IOException, InterruptedException {
         if (!satIntlDes.isEmpty()) {
-            try {
-                // SpaceTrack API has a very restrictive API Throttling, so download a mapping
-                // from CelesTrak first
-                Map<String, String[]> map = celestrak.getCelestrakMapping();
-                doGenerateGraphs(getSatIdsFromSatIntDes(map), map);
-            } catch (IOException | InterruptedException e) {
-                logger.error("Failed to generate graphs", e);
-            }
+            // SpaceTrack API has a very restrictive API Throttling, so download a mapping
+            // from CelesTrak first
+            Map<String, String[]> map = celestrak.getCelestrakMapping();
+            doGenerateGraphs(getSatIdsFromSatIntDes(map), map);
         }
-        event.getApplicationContext().close();
     }
 }
