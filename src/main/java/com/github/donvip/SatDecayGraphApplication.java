@@ -28,7 +28,7 @@ public class SatDecayGraphApplication implements ApplicationListener<Application
     public void onApplicationEvent(ApplicationReadyEvent event) {
         try {
             graphService.generateGraphs();
-        } catch (IOException | InterruptedException e) {
+        } catch (IOException | InterruptedException | SecurityException | ReflectiveOperationException e) {
             logger.error("Failed to generate graphs", e);
         }
         event.getApplicationContext().close();

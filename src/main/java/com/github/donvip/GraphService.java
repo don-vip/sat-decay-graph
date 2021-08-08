@@ -12,6 +12,7 @@ import java.awt.geom.Ellipse2D;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.text.SimpleDateFormat;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
@@ -31,7 +32,6 @@ import org.jfree.chart.LegendItemCollection;
 import org.jfree.chart.axis.AxisLocation;
 import org.jfree.chart.axis.DateAxis;
 import org.jfree.chart.axis.NumberAxis;
-import org.jfree.chart.axis.ValueAxis;
 import org.jfree.chart.plot.XYPlot;
 import org.jfree.chart.renderer.xy.AbstractXYItemRenderer;
 import org.jfree.chart.renderer.xy.SamplingXYLineRenderer;
@@ -87,6 +87,9 @@ public class GraphService {
     @Value("${endDate:#{null}}")
     private Instant endDate;
 
+    @Value("${dateFormat:#{null}}")
+    private String dateFormat;
+
     @Value("${minAltitude:0.0}")
     private double minAltitude;
 
@@ -108,6 +111,9 @@ public class GraphService {
     @Value("${shapeSize:10.0}")
     private double shapeSize;
 
+    @Value("${autoPopulateSeriesPaint:true}")
+    private boolean autoPopulateSeriesPaint;
+
     @Value("${openFile:false}")
     private boolean openFile;
 
@@ -116,6 +122,9 @@ public class GraphService {
 
     @Value("#{${overrides:T(java.util.Collections).emptyMap()}}")
     private Map<Integer, Integer> overrides;
+
+    @Value("${customRendererClass:#{null}}")
+    private Class<? extends AbstractXYItemRenderer> customRendererClass;
 
     @Autowired
     private CelestrakService celestrak;
@@ -197,7 +206,8 @@ public class GraphService {
                 .filter(s -> ((IdentifiedTimeSeries) s).getObjectId().equals(objectId)).collect(toList());
     }
 
-    private JFreeChart createChart(List<TimeSeriesCollection> datasets, String title) {
+    private JFreeChart createChart(List<TimeSeriesCollection> datasets, String title)
+            throws SecurityException, ReflectiveOperationException {
         // Create plot (downsampling very large data to avoid huge SVG files)
         XYPlot plot = createPlot(datasets);
 
@@ -207,11 +217,15 @@ public class GraphService {
         return chart;
     }
 
-    private XYPlot createPlot(List<TimeSeriesCollection> datasets) {
+    private XYPlot createPlot(List<TimeSeriesCollection> datasets)
+            throws SecurityException, ReflectiveOperationException {
         // Time axis, UTC / English
-        ValueAxis timeAxis = new DateAxis("Time (UTC)", TimeZone.getTimeZone("UTC"), Locale.ENGLISH);
+        DateAxis timeAxis = new DateAxis("Time (UTC)", TimeZone.getTimeZone("UTC"), Locale.ENGLISH);
         timeAxis.setLowerMargin(0.02);
         timeAxis.setUpperMargin(0.02);
+        if (dateFormat != null && !dateFormat.trim().isEmpty()) {
+            timeAxis.setDateFormatOverride(new SimpleDateFormat(dateFormat.trim(), Locale.ENGLISH));
+        }
 
         // Value axis (same on both sides for readability)
         NumberAxis leftAxis = new NumberAxis("Kilometers");
@@ -251,9 +265,13 @@ public class GraphService {
         return plot;
     }
 
-    private AbstractXYItemRenderer createRenderer(boolean small, double delta) {
-        AbstractXYItemRenderer renderer = small ? new XYLineAndShapeRenderer(true, true)
+    private AbstractXYItemRenderer createRenderer(boolean small, double delta)
+            throws ReflectiveOperationException, SecurityException {
+        AbstractXYItemRenderer renderer = customRendererClass != null
+                ? customRendererClass.getConstructor().newInstance()
+                : small ? new XYLineAndShapeRenderer(true, true)
                 : new SatSamplingXYLineRenderer();
+        renderer.setAutoPopulateSeriesPaint(autoPopulateSeriesPaint);
         renderer.setDefaultStroke(new BasicStroke(strokeWidth));
         renderer.setDefaultShape(new Ellipse2D.Double(-delta, -delta, shapeSize, shapeSize));
         renderer.setDataBoundsIncludesVisibleSeriesOnly(false);
@@ -285,7 +303,7 @@ public class GraphService {
     }
 
     private void doGenerateGraphs(List<Integer> ids, Map<String, String[]> map)
-            throws IOException, InterruptedException {
+            throws IOException, InterruptedException, SecurityException, ReflectiveOperationException {
         Map<Integer, String> names = new TreeMap<>();
         Map<Integer, List<GpHistory>> histories = new TreeMap<>();
         for (Integer id : ids) {
@@ -403,7 +421,8 @@ public class GraphService {
         return Stream.empty();
     }
 
-    public void generateGraphs() throws IOException, InterruptedException {
+    public void generateGraphs()
+            throws IOException, InterruptedException, SecurityException, ReflectiveOperationException {
         if (!satIntlDes.isEmpty()) {
             // SpaceTrack API has a very restrictive API Throttling, so download a mapping
             // from CelesTrak first
