@@ -238,7 +238,8 @@ public class SatDecayGraphService {
 
         // Create plot (downsampling very large data to avoid huge SVG files)
         double delta = shapeSize / 2.0;
-        boolean small = datasets.get(0).getItemCount(0) < 500;
+        @SuppressWarnings("unchecked")
+        boolean small = datasets.get(0).getSeries().stream().mapToInt(s -> ((TimeSeries) s).getItemCount()).sum() < 250;
         AbstractXYItemRenderer renderer = createRenderer(small, delta);
 
         // If multiple datasets, assume they have the same series and we want only to
