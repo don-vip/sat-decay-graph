@@ -1,5 +1,7 @@
 package com.github.donvip;
 
+import java.io.Serializable;
+
 import org.threeten.extra.scale.UtcInstant;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -102,7 +104,9 @@ public class GpHistoryQuery extends Query<GpHistoryQueryField, GpHistory, GpHist
   @Setter
   @NoArgsConstructor
   @JsonInclude(value = Include.NON_NULL)
-  public static class GpHistory {
+  public static class GpHistory implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     @JsonProperty("CCSDS_OMM_VERS")
     private String ccsdsOmmVersion;
@@ -138,7 +142,7 @@ public class GpHistoryQuery extends Query<GpHistoryQueryField, GpHistory, GpHist
     @JsonProperty("EPOCH")
     @JsonDeserialize(using = UtcInstantDeserializer.class)
     private UtcInstant epoch;
-    
+
     @JsonProperty("MEAN_MOTION")
     private Double meanMotion;
 
@@ -228,7 +232,7 @@ public class GpHistoryQuery extends Query<GpHistoryQueryField, GpHistory, GpHist
 
     @Override
     public String toString() {
-        return "GpHistory [" 
+        return "GpHistory ["
                 + (creationDate != null ? "creationDate=" + creationDate + ", " : "")
                 + (originator != null ? "originator=" + originator + ", " : "")
                 + (objectName != null ? "objectName=" + objectName + ", " : "")

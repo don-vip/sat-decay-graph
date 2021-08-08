@@ -1,8 +1,6 @@
 package com.github.donvip;
 
-import static java.util.Comparator.comparing;
 import static java.util.stream.Collectors.toList;
-import static java.util.stream.Collectors.toMap;
 import static java.util.stream.Collectors.toSet;
 
 import java.awt.BasicStroke;
@@ -12,8 +10,6 @@ import java.awt.HeadlessException;
 import java.awt.Rectangle;
 import java.awt.geom.Ellipse2D;
 import java.io.IOException;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -30,10 +26,6 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.stream.Stream;
 
-import javax.annotation.PostConstruct;
-import javax.net.ssl.HttpsURLConnection;
-
-import org.apache.commons.io.IOUtils;
 import org.jfree.chart.JFreeChart;
 import org.jfree.chart.LegendItemCollection;
 import org.jfree.chart.axis.AxisLocation;
@@ -52,33 +44,20 @@ import org.jfree.data.time.TimeSeriesDataItem;
 import org.jfree.svg.SVGGraphics2D;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.ApplicationListener;
 import org.springframework.stereotype.Service;
 
 import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.github.donvip.GpHistoryQuery.GpHistory;
-import com.github.donvip.GpHistoryQuery.GpHistoryQueryField;
-import com.stevenpaligo.spacetrack.client.SatCatQuery;
-import com.stevenpaligo.spacetrack.client.SatCatQuery.SatCat;
-import com.stevenpaligo.spacetrack.client.SatCatQuery.SatCatQueryField;
-import com.stevenpaligo.spacetrack.client.credential.CredentialProvider;
-import com.stevenpaligo.spacetrack.client.credential.DefaultCredentialProvider;
-import com.stevenpaligo.spacetrack.client.predicate.Equal;
-import com.stevenpaligo.spacetrack.client.predicate.GreaterThan;
-import com.stevenpaligo.spacetrack.client.predicate.LessThan;
-import com.stevenpaligo.spacetrack.client.predicate.StartsWith;
 
 @Service
-public class SatDecayGraphService {
+public class GraphService implements ApplicationListener<ApplicationReadyEvent> {
 
-    private static final Logger logger = LoggerFactory.getLogger(SatDecayGraphService.class);
-
-    @Value("${spaceTrackLogin}")
-    private String spaceTrackLogin;
-
-    @Value("${spaceTrackPassword}")
-    private String spaceTrackPassword;
+    private static final Logger logger = LoggerFactory.getLogger(GraphService.class);
 
     @Value("${plotMode:distinct}")
     private PlotMode plotMode;
@@ -116,8 +95,8 @@ public class SatDecayGraphService {
     @Value("${satIntlDes:#{T(java.util.Collections).emptyList()}}")
     private List<String> satIntlDes;
 
-    @Value("${satIntlDesExcl:#{T(java.util.Collections).emptyList()}}")
-    private List<String> satIntlDesExcl;
+    @Value("${satIdsExcl:#{T(java.util.Collections).emptyList()}}")
+    private List<Integer> satIdsExcl;
 
     @Value("${width:1920}")
     private int width;
@@ -139,6 +118,12 @@ public class SatDecayGraphService {
 
     @Value("#{${overrides:T(java.util.Collections).emptyMap()}}")
     private Map<Integer, Integer> overrides;
+
+    @Autowired
+    private CelestrakService celestrak;
+
+    @Autowired
+    private SpaceTrackService spaceTrack;
 
     private static String generateSVGForChart(JFreeChart chart, int width, int height) {
         SVGGraphics2D g2 = new SVGGraphics2D(width, height);
@@ -301,34 +286,13 @@ public class SatDecayGraphService {
         combined, distinct;
     }
 
-    private static void apiThrottle() throws InterruptedException {
-        // API throttle: Limit API queries to less than 30 requests per minute / 300 requests per hour
-        Thread.sleep(3333);
-    }
-
-    private List<GpHistory> fetchHistory(Integer id, CredentialProvider credentials)
-            throws JsonParseException, JsonMappingException, IOException {
-        GpHistoryQuery q = new GpHistoryQuery().setCredentials(credentials)
-                .addPredicate(new Equal<>(GpHistoryQueryField.CATALOG_NUMBER, id));
-        if (startDate != null) {
-            q.addPredicate(new GreaterThan<>(GpHistoryQueryField.EPOCH, startDate));
-        }
-        if (endDate != null) {
-            q.addPredicate(new LessThan<>(GpHistoryQueryField.EPOCH, endDate));
-        }
-        if (minAltitude < 0.0 || minAltitude > 0.0) {
-            q.addPredicate(new GreaterThan<>(GpHistoryQueryField.PERIAPSIS, minAltitude));
-        }
-        return q.execute().stream().sorted(comparing(GpHistory::getEpoch)).collect(toList());
-    }
-
-    private void doGenerateGraphs(List<Integer> ids, CredentialProvider credentials, Map<String, String[]> map)
+    private void doGenerateGraphs(List<Integer> ids, Map<String, String[]> map)
             throws IOException, InterruptedException {
         Map<Integer, String> names = new TreeMap<>();
         Map<Integer, List<GpHistory>> histories = new TreeMap<>();
         for (Integer id : ids) {
             logger.info("Fetching history for satellite {}", id);
-            List<GpHistory> history = fetchHistory(id, credentials);
+            List<GpHistory> history = spaceTrack.fetchHistory(id, startDate, endDate, minAltitude);
             if (history.isEmpty()) {
                 logger.error("Unable to generate graph for satellite {} (empty history)", id);
             } else {
@@ -353,7 +317,6 @@ public class SatDecayGraphService {
                     throw new UnsupportedOperationException(Objects.toString(plotMode));
                 }
             }
-            apiThrottle();
         }
         if (PlotMode.combined == plotMode && !histories.isEmpty()) {
             Set<String> objectNames = new TreeSet<>(names.values().stream().collect(toSet()));
@@ -391,23 +354,10 @@ public class SatDecayGraphService {
         return objectName;
     }
 
-    private Map<String, String[]> getCelestrakMapping() throws IOException {
-        logger.info("Retrieving SATCAT data from CelesTrak...");
-        HttpsURLConnection connection = (HttpsURLConnection) new URL("https://celestrak.com/pub/satcat.csv").openConnection();
-        try {
-            return IOUtils.toString(connection.getInputStream(), StandardCharsets.UTF_8).lines()
-                    .map(l -> l.split(","))
-                    .filter(t -> t.length >= 3)
-                    .collect(toMap(t -> t[1], t -> t));
-        } finally {
-            connection.disconnect();
-        }
-    }
-
-    private List<Integer> getSatIdsFromSatIntDes(Map<String, String[]> map, CredentialProvider credentials) {
+    private List<Integer> getSatIdsFromSatIntDes(Map<String, String[]> map) {
         return satIntlDes.stream().flatMap(d -> {
             try {
-                return d.endsWith("*") ? mapMultiId(d, map, credentials) : mapSingleId(d, map, credentials);
+                return d.endsWith("*") ? mapMultiId(d, map) : mapSingleId(d, map);
             } catch (IOException | InterruptedException | NumberFormatException e) {
                 logger.error("Failed to retrieve satcat " + d, e);
                 return Stream.empty();
@@ -415,7 +365,7 @@ public class SatDecayGraphService {
         }).filter(Objects::nonNull).distinct().collect(toList());
     }
 
-    private static Stream<Integer> mapSingleId(String d, Map<String, String[]> map, CredentialProvider credentials)
+    private Stream<Integer> mapSingleId(String d, Map<String, String[]> map)
             throws JsonParseException, JsonMappingException, IOException, InterruptedException {
         Integer catalogNumber = null;
         String[] strings = map.get(d.trim());
@@ -423,12 +373,7 @@ public class SatDecayGraphService {
         if (id != null && !id.isBlank()) {
             catalogNumber = Integer.valueOf(id);
         } else {
-            List<SatCat> satcat = new SatCatQuery().setCredentials(credentials)
-                    .addPredicate(new Equal<>(SatCatQueryField.INTERNATIONAL_DESIGNATOR, d.trim())).execute();
-            if (!satcat.isEmpty()) {
-                catalogNumber = satcat.get(0).getCatalogNumber();
-            }
-            apiThrottle();
+            catalogNumber = spaceTrack.findCatalogNumber(d.trim());
         }
         if (catalogNumber != null) {
             logger.info("Mapped satellite international designator {} to catalog number {}", d, catalogNumber);
@@ -437,25 +382,22 @@ public class SatDecayGraphService {
         return Stream.empty();
     }
 
-    private Stream<Integer> mapMultiId(String d, Map<String, String[]> map, CredentialProvider credentials)
+    private Stream<Integer> mapMultiId(String d, Map<String, String[]> map)
             throws InterruptedException, JsonParseException, JsonMappingException, IOException {
         String des = d.substring(0, d.lastIndexOf('*')).trim();
 
         List<Integer> catalogNumbers = map.entrySet().stream()
-                .filter(e -> !satIntlDesExcl.contains(e.getKey()) && e.getKey().startsWith(des)).map(e -> {
+                .filter(e -> e.getKey().startsWith(des)).map(e -> {
             String[] strings = e.getValue();
             String id = strings == null ? null : strings[2];
             return id != null && !id.isBlank() ? Integer.valueOf(id) : null;
         }).filter(Objects::nonNull).sorted().collect(toList());
 
         if (catalogNumbers.isEmpty()) {
-            catalogNumbers = new SatCatQuery().setCredentials(credentials)
-                    .addPredicate(new StartsWith<>(SatCatQueryField.INTERNATIONAL_DESIGNATOR, des)).execute()
-                    .stream().filter(s -> !satIntlDesExcl.contains(s.getInternationalDesignator()))
-                    .map(SatCat::getCatalogNumber).sorted().collect(toList());
-            apiThrottle();
+            catalogNumbers = spaceTrack.findCatalogNumbers(des);
         }
 
+        catalogNumbers.removeAll(satIdsExcl);
         if (!catalogNumbers.isEmpty()) {
             logger.info("Mapped satellite international designator pattern {} to catalog numbers {}", d, catalogNumbers);
             return catalogNumbers.stream();
@@ -463,13 +405,18 @@ public class SatDecayGraphService {
         return Stream.empty();
     }
 
-    @PostConstruct
-    public void generateGraphs() throws IOException, InterruptedException {
+    @Override
+    public void onApplicationEvent(ApplicationReadyEvent event) {
         if (!satIntlDes.isEmpty()) {
-            CredentialProvider credentials = new DefaultCredentialProvider(spaceTrackLogin, spaceTrackPassword);
-            // SpaceTrack API has a very restrictive API Throttling, so download a mapping from CelesTrak first
-            Map<String, String[]> map = getCelestrakMapping();
-            doGenerateGraphs(getSatIdsFromSatIntDes(map, credentials), credentials, map);
+            try {
+                // SpaceTrack API has a very restrictive API Throttling, so download a mapping
+                // from CelesTrak first
+                Map<String, String[]> map = celestrak.getCelestrakMapping();
+                doGenerateGraphs(getSatIdsFromSatIntDes(map), map);
+            } catch (IOException | InterruptedException e) {
+                logger.error("Failed to generate graphs", e);
+            }
         }
+        event.getApplicationContext().close();
     }
 }

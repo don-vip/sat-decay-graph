@@ -27,14 +27,29 @@
 			<version>1.5.3</version>
 		</dependency>
 		<dependency>
-		    <groupId>org.jfree</groupId>
-		    <artifactId>org.jfree.svg</artifactId>
-		    <version>5.0</version>
+			<groupId>org.jfree</groupId>
+			<artifactId>org.jfree.svg</artifactId>
+			<version>5.0</version>
 		</dependency>
 		<dependency>
 			<groupId>com.stevenpaligo</groupId>
 			<artifactId>spacetrack-client</artifactId>
 			<version>1.1.0</version>
+		</dependency>
+		<dependency>
+			<groupId>javax.cache</groupId>
+			<artifactId>cache-api</artifactId>
+			<version>1.1.1</version>
+		</dependency>
+		<dependency>
+			<groupId>org.ehcache</groupId>
+			<artifactId>ehcache</artifactId>
+			<version>3.8.1</version>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-cache</artifactId>
+			<version>${spring.boot.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
