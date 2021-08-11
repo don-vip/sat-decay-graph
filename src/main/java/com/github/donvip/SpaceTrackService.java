@@ -80,7 +80,7 @@ public class SpaceTrackService {
     private static <T> T apiThrottle(T result) throws InterruptedException {
         // API throttle: Limit API queries to less than 30 requests per minute / 300
         // requests per hour
-        Thread.sleep(3333);
+        Thread.sleep(12_000);
         return result;
     }
 }

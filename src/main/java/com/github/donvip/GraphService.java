@@ -423,6 +423,7 @@ public class GraphService {
 
     public void generateGraphs()
             throws IOException, InterruptedException, SecurityException, ReflectiveOperationException {
+        logger.info("Generating graphs for {}", satIntlDes);
         if (!satIntlDes.isEmpty()) {
             // SpaceTrack API has a very restrictive API Throttling, so download a mapping
             // from CelesTrak first
