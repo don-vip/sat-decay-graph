@@ -354,7 +354,12 @@ public class GraphService {
             try {
                 Desktop.getDesktop().browse(Path.of(filename).toUri());
             } catch (HeadlessException e) {
-                Runtime.getRuntime().exec(String.format("cmd /c start %s", filename));
+                String os = System.getProperty("os.name");
+                if (os != null && os.toLowerCase(Locale.ENGLISH).startsWith("windows")) {
+                    Runtime.getRuntime().exec(String.format("cmd /c start %s", filename));
+                } else {
+                    Runtime.getRuntime().exec(String.format("open %s", filename));
+                }
             }
         }
     }
