@@ -9,7 +9,7 @@
 	<properties>
 		<maven.compiler.source>11</maven.compiler.source>
 		<maven.compiler.target>11</maven.compiler.target>
-		<spring.boot.version>2.5.6</spring.boot.version>
+		<spring.boot.version>2.6.3</spring.boot.version>
 		<sonar.projectKey>don-vip_sat-decay-graph</sonar.projectKey>
 		<sonar.organization>don-vip</sonar.organization>
 		<sonar.host.url>https://sonarcloud.io</sonar.host.url>
@@ -97,7 +97,7 @@
 						<path>
 							<groupId>org.projectlombok</groupId>
 							<artifactId>lombok</artifactId>
-							<version>1.18.16</version>
+							<version>1.18.22</version>
 						</path>
 					</annotationProcessorPaths>
 				</configuration>
